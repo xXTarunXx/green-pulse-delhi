@@ -1,0 +1,63 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function userIdIsUnchanged() {
+      return request.resource.data.userId == resource.data.userId;
+    }
+
+    function createsOwnDocument() {
+      return isSignedIn() &&
+        request.resource.data.userId == request.auth.uid;
+    }
+
+    function updatesOwnDocument() {
+      return isSignedIn() &&
+        resource.data.userId == request.auth.uid &&
+        userIdIsUnchanged();
+    }
+
+    function isBuddyMatchUpdate() {
+      return isSignedIn() &&
+        resource.data.status == 'searching' &&
+        request.resource.data.status == 'matched' &&
+        request.resource.data.userId == resource.data.userId &&
+        request.resource.data.matchedWith == request.auth.uid;
+    }
+
+    match /users/{userId} {
+      allow read, create, update: if isOwner(userId);
+      allow delete: if false;
+    }
+
+    match /trails/{trailId} {
+      allow read: if isSignedIn() &&
+        resource.data.userId == request.auth.uid;
+      allow create: if createsOwnDocument();
+      allow update: if updatesOwnDocument();
+      allow delete: if false;
+    }
+
+    match /safety_reviews/{reviewId} {
+      allow read: if isSignedIn();
+      allow create: if createsOwnDocument();
+      allow update: if updatesOwnDocument();
+      allow delete: if false;
+    }
+
+    match /buddy_requests/{requestId} {
+      allow read: if isSignedIn();
+      allow create: if createsOwnDocument();
+      allow update: if updatesOwnDocument() || isBuddyMatchUpdate();
+      allow delete: if false;
+    }
+  }
+}
