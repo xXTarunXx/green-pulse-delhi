@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:math' as math;
 import 'package:flutter/foundation.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:http/http.dart' as http;
 
@@ -9,7 +10,7 @@ import '../models/safety_review.dart';
 /// Generates randomised walking trails using Google Directions API.
 class TrailService {
   // IMPORTANT: Never hardcode API keys. Use package:flutter_dotenv to load from .env file
-  static const String _apiKey = 'YOUR_API_KEY_HERE';
+  static String get _apiKey => dotenv.env['GOOGLE_MAPS_API_KEY'] ?? '';
 
   static const String _directionsBaseUrl =
       'https://maps.googleapis.com/maps/api/directions/json';
