@@ -6,6 +6,17 @@ plugins {
     id("com.google.gms.google-services")
 }
 
+import java.util.Properties
+import java.io.FileInputStream
+
+val envFile = project.rootProject.file("../.env")
+val envProperties = Properties()
+if (envFile.exists()) {
+    envProperties.load(FileInputStream(envFile))
+}
+val googleMapsApiKey = envProperties.getProperty("GOOGLE_MAPS_API_KEY") ?: ""
+
+
 android {
     namespace = "com.example.green_pulse_delhi"
     compileSdk = flutter.compileSdkVersion
@@ -29,6 +40,7 @@ android {
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+        manifestPlaceholders["googleMapsApiKey"] = googleMapsApiKey
     }
 
     buildTypes {

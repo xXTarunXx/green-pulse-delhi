@@ -122,7 +122,7 @@ class _HomeMapScreenState extends State<HomeMapScreen>
   static const LatLng _delhiCenter = LatLng(28.5745, 77.1990);
 
   // Overlay toggles
-  bool _showHeatmap = true;
+  bool _showHeatmap = false;
   bool _showShadedPaths = false;
 
   // Trail state

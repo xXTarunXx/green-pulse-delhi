@@ -154,7 +154,7 @@ firebase deploy --only firestore:rules
 
 ```bash
 firebase deploy --only firestore:indexes
-```
+``` 
 
 ### Fresh Install Check
 
