@@ -63,6 +63,136 @@ class TrailService {
     return _fetchDirections(routePoints);
   }
 
+  // ── Alternate Routes ──────────────────────────────────────────────────
+
+  /// Generate 3 distinctly shaped walking trails for the user to choose from.
+  ///
+  /// Returns a list of 1–3 trails (fewer on partial API failure).
+  /// Returns an empty list if all 3 fail.
+  Future<List<GeneratedTrail>> generateAlternateTrails({
+    required LatLng center,
+    required double distanceKm,
+    required List<SafetyReview> avoidZones,
+  }) async {
+    final rng = math.Random();
+    final distMeters = distanceKm * 1000;
+
+    // Empirically calibrated divisors for Indian urban road networks.
+    // Walking paths are 1.5–2.5× longer than straight-line distance due to
+    // road layout, one-ways, detours, and random waypoint ordering.
+    // The Directions API also uses optimize:true to reorder waypoints
+    // efficiently (see _fetchDirections).
+
+    // ── Route 1: Out-and-Back (visually straight corridor) ──
+    // 2 waypoints along same bearing → ~4.5R effective road distance
+    final outBackRadius = distMeters / 4.5;
+    final bearing = rng.nextDouble() * 360.0; // single random bearing
+    final outBackWaypoints = <LatLng>[
+      _pointAtBearingAndDistance(center, bearing, outBackRadius * 0.7),
+      _pointAtBearingAndDistance(center, bearing, outBackRadius * 1.0),
+    ];
+    final outBackRoute = [center, ...outBackWaypoints, center];
+
+    // ── Route 2: Broad Loop (wide circular journey) ──
+    // 4 waypoints + optimize:true reorders into efficient loop → ~8R
+    final loopRadius = distMeters / 8.0;
+    final loopWaypoints = _generateSafeWaypoints(
+      center: center,
+      radiusMeters: loopRadius,
+      count: 4,
+      avoidZones: avoidZones,
+      rng: rng,
+    );
+    final loopRoute = [center, ...loopWaypoints, center];
+
+    // ── Route 3: Neighborhood Zig-Zag (dense, close to home) ──
+    // Many waypoints in tight area → scale divisor with waypoint count
+    final zigzagCount = math.max(3, (distanceKm * 1.5).ceil());
+    final zigzagRadius = distMeters / ((zigzagCount + 1) * 1.8);
+    final zigzagWaypoints = _generateSafeWaypoints(
+      center: center,
+      radiusMeters: zigzagRadius,
+      count: zigzagCount,
+      avoidZones: avoidZones,
+      rng: rng,
+    );
+    final zigzagRoute = [center, ...zigzagWaypoints, center];
+
+    // Fire all 3 API calls in parallel
+    final results = await Future.wait([
+      _fetchDirections(outBackRoute),
+      _fetchDirections(loopRoute),
+      _fetchDirections(zigzagRoute),
+    ]);
+
+    // Filter out nulls (failed calls) and return whatever succeeded
+    return results.whereType<GeneratedTrail>().toList();
+  }
+
+  /// Generate [count] random waypoints within [radiusMeters] of [center],
+  /// excluding points within 150m of severe safety reviews.
+  List<LatLng> _generateSafeWaypoints({
+    required LatLng center,
+    required double radiusMeters,
+    required int count,
+    required List<SafetyReview> avoidZones,
+    required math.Random rng,
+  }) {
+    final waypoints = <LatLng>[];
+    int attempts = 0;
+    while (waypoints.length < count && attempts < 50) {
+      final point = _randomPointInRadius(center, radiusMeters, rng);
+
+      final isSafe = !avoidZones.any((review) {
+        if (review.severity < 3) return false;
+        final dist = _haversineDistance(
+          point.latitude,
+          point.longitude,
+          review.position.latitude,
+          review.position.longitude,
+        );
+        return dist < 150;
+      });
+
+      if (isSafe) {
+        waypoints.add(point);
+      }
+      attempts++;
+    }
+
+    // Fallback: if avoid-zone filtering was too aggressive, return what we have
+    if (waypoints.length < 2) {
+      debugPrint('Warning: only generated ${waypoints.length}/$count safe waypoints');
+    }
+    return waypoints;
+  }
+
+  /// Generate a LatLng at a specific [bearingDeg] (0–360°) and [distMeters]
+  /// from [center]. Used for the Out-and-Back corridor strategy.
+  LatLng _pointAtBearingAndDistance(
+      LatLng center, double bearingDeg, double distMeters) {
+    const R = 6371000.0; // Earth radius in meters
+    final lat1 = _toRad(center.latitude);
+    final lon1 = _toRad(center.longitude);
+    final brng = _toRad(bearingDeg);
+    final d = distMeters / R;
+
+    final lat2 = math.asin(
+      math.sin(lat1) * math.cos(d) +
+          math.cos(lat1) * math.sin(d) * math.cos(brng),
+    );
+    final lon2 = lon1 +
+        math.atan2(
+          math.sin(brng) * math.sin(d) * math.cos(lat1),
+          math.cos(d) - math.sin(lat1) * math.sin(lat2),
+        );
+
+    return LatLng(
+      lat2 * 180 / math.pi,
+      lon2 * 180 / math.pi,
+    );
+  }
+
   /// Call Google Directions API with walking mode.
   Future<GeneratedTrail?> _fetchDirections(List<LatLng> points) async {
     final origin = '${points.first.latitude},${points.first.longitude}';
@@ -78,7 +208,7 @@ class TrailService {
       '$_directionsBaseUrl?'
       'origin=$origin'
       '&destination=$destination'
-      '&waypoints=$waypointsParam'
+      '&waypoints=optimize:true|$waypointsParam'
       '&mode=walking'
       '&key=$_apiKey',
     );

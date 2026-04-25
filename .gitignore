@@ -49,3 +49,7 @@ google-services.json
 GoogleService-Info.plist
 firebase_options.dart
 .env
+
+# Graphify analysis output
+graphify-out/
+.graphify_python

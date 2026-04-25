@@ -127,9 +127,12 @@ class _HomeMapScreenState extends State<HomeMapScreen>
 
   // Trail state
   bool _isGeneratingTrail = false;
-  GeneratedTrail? _generatedTrail;
+  List<GeneratedTrail> _alternateTrails = [];
+  int? _selectedTrailIndex;
+  GeneratedTrail? _generatedTrail; // populated on "Start Walk"
   String? _activeTrailId;
   bool _isWalking = false;
+  double _distanceKm = 3.0; // slider value for distance sheet
 
   // Heatmap pulse animation
   late AnimationController _pulseController;
@@ -245,11 +248,51 @@ class _HomeMapScreenState extends State<HomeMapScreen>
     }).toSet();
   }
 
+  // Route colors for alternate trails (mapped by index)
+  static const List<Color> _routeColors = [
+    Color(0xFF7BA7BC), // Dusty Blue  — Out-and-Back
+    Color(0xFF8BA888), // Muted Sage  — Broad Loop
+    Color(0xFFC4836A), // Terracotta  — Zig-Zag
+  ];
+
+  static const List<String> _routeLabels = [
+    'Out-and-Back',
+    'Broad Loop',
+    'Zig-Zag',
+  ];
+
   Set<Polyline> _buildPolylines() {
     final polylines = <Polyline>{};
 
-    // Generated trail polyline
-    if (_generatedTrail != null) {
+    // Alternate trails (selection phase)
+    if (_alternateTrails.isNotEmpty) {
+      for (int i = 0; i < _alternateTrails.length; i++) {
+        final isSelected = _selectedTrailIndex == i;
+        final hasSelection = _selectedTrailIndex != null;
+        final color = i < _routeColors.length
+            ? _routeColors[i]
+            : _routeColors[i % _routeColors.length];
+
+        polylines.add(Polyline(
+          polylineId: PolylineId('alternate_$i'),
+          points: _alternateTrails[i].waypoints,
+          color: hasSelection && !isSelected
+              ? color.withValues(alpha: 0.4)
+              : color,
+          width: isSelected ? 6 : 4,
+          patterns: isSelected
+              ? [] // solid line for selected
+              : [PatternItem.dash(20), PatternItem.gap(10)],
+          consumeTapEvents: true,
+          onTap: () {
+            setState(() => _selectedTrailIndex = i);
+          },
+        ));
+      }
+    }
+
+    // Active walking trail polyline
+    if (_generatedTrail != null && _alternateTrails.isEmpty) {
       polylines.add(Polyline(
         polylineId: const PolylineId('generated_trail'),
         points: _generatedTrail!.waypoints,
@@ -286,9 +329,168 @@ class _HomeMapScreenState extends State<HomeMapScreen>
     });
   }
 
-  // ── Trail Generation ─────────────────────────────────────────────────
+  // ── Trail Generation (Alternate Routes) ──────────────────────────────
 
-  Future<void> _generateTrail() async {
+  void _showDistanceSheet() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) {
+        double localDistance = _distanceKm;
+        return StatefulBuilder(
+          builder: (ctx, setSheetState) {
+            return Container(
+              padding: const EdgeInsets.fromLTRB(24, 20, 24, 32),
+              decoration: BoxDecoration(
+                color: Theme.of(context).colorScheme.surface,
+                borderRadius: const BorderRadius.vertical(
+                    top: Radius.circular(28)),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.15),
+                    blurRadius: 20,
+                    offset: const Offset(0, -4),
+                  ),
+                ],
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // Handle bar
+                  Container(
+                    width: 40,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: Theme.of(context)
+                          .colorScheme
+                          .onSurfaceVariant
+                          .withValues(alpha: 0.3),
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+                  Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(
+                          color: Theme.of(context)
+                              .colorScheme
+                              .primary
+                              .withValues(alpha: 0.12),
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                        child: Icon(Icons.route_rounded,
+                            color: Theme.of(context).colorScheme.primary,
+                            size: 24),
+                      ),
+                      const SizedBox(width: 14),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Choose Distance',
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .titleMedium
+                                  ?.copyWith(fontWeight: FontWeight.w700),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              'We\'ll find 3 unique routes for you',
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .bodySmall
+                                  ?.copyWith(
+                                    color: Theme.of(context)
+                                        .colorScheme
+                                        .onSurfaceVariant,
+                                  ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 24),
+                  // Distance value
+                  Text(
+                    '${localDistance.toStringAsFixed(1)} km',
+                    style: Theme.of(context).textTheme.headlineMedium?.copyWith(
+                          fontWeight: FontWeight.w800,
+                          color: Theme.of(context).colorScheme.primary,
+                        ),
+                  ),
+                  const SizedBox(height: 8),
+                  // Slider
+                  SliderTheme(
+                    data: SliderTheme.of(context).copyWith(
+                      trackHeight: 6,
+                      thumbShape: const RoundSliderThumbShape(
+                          enabledThumbRadius: 10),
+                      overlayShape: const RoundSliderOverlayShape(
+                          overlayRadius: 20),
+                    ),
+                    child: Slider(
+                      value: localDistance,
+                      min: 1.0,
+                      max: 10.0,
+                      divisions: 18, // 0.5 km steps
+                      label: '${localDistance.toStringAsFixed(1)} km',
+                      activeColor: Theme.of(context).colorScheme.primary,
+                      inactiveColor: Theme.of(context)
+                          .colorScheme
+                          .primary
+                          .withValues(alpha: 0.15),
+                      onChanged: (v) {
+                        setSheetState(() => localDistance = v);
+                      },
+                    ),
+                  ),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text('1 km',
+                          style: Theme.of(context).textTheme.labelSmall),
+                      Text('10 km',
+                          style: Theme.of(context).textTheme.labelSmall),
+                    ],
+                  ),
+                  const SizedBox(height: 20),
+                  // Find Routes button
+                  SizedBox(
+                    width: double.infinity,
+                    child: FilledButton.icon(
+                      onPressed: () {
+                        _distanceKm = localDistance;
+                        Navigator.pop(ctx);
+                        _generateAlternateTrails();
+                      },
+                      icon: const Icon(Icons.explore_rounded, size: 20),
+                      label: const Text('Find Routes'),
+                      style: FilledButton.styleFrom(
+                        backgroundColor:
+                            Theme.of(context).colorScheme.primary,
+                        foregroundColor:
+                            Theme.of(context).colorScheme.onPrimary,
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(14)),
+                        padding:
+                            const EdgeInsets.symmetric(vertical: 16),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Future<void> _generateAlternateTrails() async {
     final locationService = context.read<LocationService>();
     final trailService = context.read<TrailService>();
     final safetyService = context.read<SafetyService>();
@@ -314,29 +516,48 @@ class _HomeMapScreenState extends State<HomeMapScreen>
 
     final userLatLng = LatLng(position.latitude, position.longitude);
 
-    // Generate trail avoiding danger zones
-    final trail = await trailService.generateTrail(
+    // Generate 3 alternate trails in parallel
+    final trails = await trailService.generateAlternateTrails(
       center: userLatLng,
+      distanceKm: _distanceKm,
       avoidZones: safetyService.reviews,
     );
 
-    if (trail != null && mounted) {
+    if (trails.isNotEmpty && mounted) {
       setState(() {
-        _generatedTrail = trail;
+        _alternateTrails = trails;
+        _selectedTrailIndex = null;
         _isGeneratingTrail = false;
       });
 
-      // Zoom to trail
-      if (_mapController != null && trail.waypoints.isNotEmpty) {
-        final bounds = _boundsFromPoints(trail.waypoints);
-        _mapController!.animateCamera(
-          CameraUpdate.newLatLngBounds(bounds, 80),
+      // Show note if fewer than 3 routes returned
+      if (trails.length < 3 && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+                'ℹ️ Found ${trails.length} of 3 routes. Some couldn\'t be generated.'),
+            behavior: SnackBarBehavior.floating,
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            duration: const Duration(seconds: 3),
+          ),
         );
+      }
+
+      // Zoom to show all trails
+      if (_mapController != null) {
+        final allPoints = trails.expand((t) => t.waypoints).toList();
+        if (allPoints.isNotEmpty) {
+          final bounds = _boundsFromPoints(allPoints);
+          _mapController!.animateCamera(
+            CameraUpdate.newLatLngBounds(bounds, 80),
+          );
+        }
       }
     } else if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: const Text('⚠️ Could not generate trail. Try again.'),
+          content: const Text('⚠️ Could not generate trails. Try again.'),
           behavior: SnackBarBehavior.floating,
           shape:
               RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
@@ -344,6 +565,23 @@ class _HomeMapScreenState extends State<HomeMapScreen>
       );
       setState(() => _isGeneratingTrail = false);
     }
+  }
+
+  void _startWalkFromSelection() {
+    if (_selectedTrailIndex == null) return;
+    setState(() {
+      _generatedTrail = _alternateTrails[_selectedTrailIndex!];
+      _alternateTrails = [];
+      _selectedTrailIndex = null;
+    });
+    _startWalk(); // existing method, unchanged
+  }
+
+  void _clearAlternates() {
+    setState(() {
+      _alternateTrails = [];
+      _selectedTrailIndex = null;
+    });
   }
 
   LatLngBounds _boundsFromPoints(List<LatLng> points) {
@@ -673,13 +911,6 @@ class _HomeMapScreenState extends State<HomeMapScreen>
             ),
           ),
 
-          // ── Top Bar ─────────────────────────────────────────────
-          Positioned(
-            top: MediaQuery.of(context).padding.top + 8,
-            left: 16,
-            right: 16,
-            child: _TopSearchBar(colorScheme: cs, textTheme: tt),
-          ),
 
           // ── Right-side filter toggles ───────────────────────────
           Positioned(
@@ -748,8 +979,27 @@ class _HomeMapScreenState extends State<HomeMapScreen>
               ),
             ),
 
-          // ── Trail Preview Panel ─────────────────────────────────
-          if (_generatedTrail != null && !_isWalking)
+          // ── Alternate Route Selection Panel ────────────────────
+          if (_alternateTrails.isNotEmpty && !_isWalking)
+            Positioned(
+              bottom: 96,
+              left: 16,
+              right: 16,
+              child: _AlternateRoutePanel(
+                trails: _alternateTrails,
+                selectedIndex: _selectedTrailIndex,
+                routeColors: _routeColors,
+                routeLabels: _routeLabels,
+                onSelect: (i) => setState(() => _selectedTrailIndex = i),
+                onStartWalk: _startWalkFromSelection,
+                onCancel: _clearAlternates,
+                cs: cs,
+                tt: tt,
+              ),
+            ),
+
+          // ── Trail Preview Panel (active walk) ─────────────────
+          if (_generatedTrail != null && !_isWalking && _alternateTrails.isEmpty)
             Positioned(
               bottom: 96,
               left: 16,
@@ -793,10 +1043,10 @@ class _HomeMapScreenState extends State<HomeMapScreen>
         mainAxisSize: MainAxisSize.min,
         children: [
           // Generate Trail FAB
-          if (!_isWalking && _generatedTrail == null)
+          if (!_isWalking && _generatedTrail == null && _alternateTrails.isEmpty)
             FloatingActionButton(
               heroTag: 'generate_trail',
-              onPressed: _isGeneratingTrail ? null : _generateTrail,
+              onPressed: _isGeneratingTrail ? null : _showDistanceSheet,
               backgroundColor: cs.primaryContainer,
               child: _isGeneratingTrail
                   ? SizedBox(
@@ -818,6 +1068,216 @@ class _HomeMapScreenState extends State<HomeMapScreen>
         ],
       ),
       floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
+    );
+  }
+}
+
+// ─── Alternate Route Selection Panel ─────────────────────────────────────────
+
+class _AlternateRoutePanel extends StatelessWidget {
+  final List<GeneratedTrail> trails;
+  final int? selectedIndex;
+  final List<Color> routeColors;
+  final List<String> routeLabels;
+  final ValueChanged<int> onSelect;
+  final VoidCallback onStartWalk;
+  final VoidCallback onCancel;
+  final ColorScheme cs;
+  final TextTheme tt;
+
+  const _AlternateRoutePanel({
+    required this.trails,
+    required this.selectedIndex,
+    required this.routeColors,
+    required this.routeLabels,
+    required this.onSelect,
+    required this.onStartWalk,
+    required this.onCancel,
+    required this.cs,
+    required this.tt,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final selectedTrail =
+        selectedIndex != null ? trails[selectedIndex!] : null;
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: cs.surface,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(
+          color: selectedIndex != null
+              ? routeColors[selectedIndex!].withValues(alpha: 0.4)
+              : cs.outlineVariant.withValues(alpha: 0.3),
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.08),
+            blurRadius: 16,
+            offset: const Offset(0, 6),
+          ),
+        ],
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // Header row
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: cs.primary.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child:
+                    Icon(Icons.alt_route_rounded, color: cs.primary, size: 24),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Choose a Route',
+                        style:
+                            tt.titleSmall?.copyWith(fontWeight: FontWeight.w700)),
+                    const SizedBox(height: 2),
+                    Text(
+                      selectedIndex != null
+                          ? 'Tap "Start Walk" to begin'
+                          : 'Tap a route on the map or below',
+                      style:
+                          tt.bodySmall?.copyWith(color: cs.onSurfaceVariant),
+                    ),
+                  ],
+                ),
+              ),
+              IconButton(
+                icon: Icon(Icons.close_rounded,
+                    color: cs.onSurfaceVariant, size: 20),
+                onPressed: onCancel,
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+
+          // Route type chips
+          Row(
+            children: List.generate(trails.length, (i) {
+              final isSelected = selectedIndex == i;
+              final color = i < routeColors.length
+                  ? routeColors[i]
+                  : routeColors[i % routeColors.length];
+              final label = i < routeLabels.length
+                  ? routeLabels[i]
+                  : 'Route ${i + 1}';
+
+              return Expanded(
+                child: Padding(
+                  padding: EdgeInsets.only(right: i < trails.length - 1 ? 8 : 0),
+                  child: GestureDetector(
+                    onTap: () => onSelect(i),
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 200),
+                      padding: const EdgeInsets.symmetric(
+                          vertical: 10, horizontal: 8),
+                      decoration: BoxDecoration(
+                        color: isSelected
+                            ? color.withValues(alpha: 0.15)
+                            : cs.surfaceContainerHighest.withValues(alpha: 0.5),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(
+                          color: isSelected
+                              ? color
+                              : Colors.transparent,
+                          width: 1.5,
+                        ),
+                      ),
+                      child: Column(
+                        children: [
+                          // Color dot
+                          Container(
+                            width: 10,
+                            height: 10,
+                            decoration: BoxDecoration(
+                              color: color,
+                              shape: BoxShape.circle,
+                            ),
+                          ),
+                          const SizedBox(height: 6),
+                          Text(
+                            label,
+                            style: tt.labelSmall?.copyWith(
+                              fontWeight: isSelected
+                                  ? FontWeight.w700
+                                  : FontWeight.w500,
+                              color: isSelected ? color : cs.onSurfaceVariant,
+                            ),
+                            textAlign: TextAlign.center,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            '${(trails[i].distanceMeters / 1000).toStringAsFixed(1)} km',
+                            style: tt.labelSmall?.copyWith(
+                              fontSize: 10,
+                              color: cs.onSurfaceVariant,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              );
+            }),
+          ),
+
+          // Selected route details + Start Walk button
+          if (selectedTrail != null) ...[
+            const SizedBox(height: 14),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              decoration: BoxDecoration(
+                color: routeColors[selectedIndex!].withValues(alpha: 0.08),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceAround,
+                children: [
+                  _MiniStat(
+                    label: 'Distance',
+                    value:
+                        '${(selectedTrail.distanceMeters / 1000).toStringAsFixed(1)} km',
+                  ),
+                  _MiniStat(
+                    label: 'Est. Time',
+                    value: '~${selectedTrail.estimatedMinutes} min',
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 14),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton.icon(
+                onPressed: onStartWalk,
+                icon: const Icon(Icons.play_arrow_rounded, size: 20),
+                label: const Text('Start Walk'),
+                style: FilledButton.styleFrom(
+                  backgroundColor: routeColors[selectedIndex!],
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14)),
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                ),
+              ),
+            ),
+          ],
+        ],
+      ),
     );
   }
 }
@@ -1335,54 +1795,6 @@ class _ReportAreaSheetState extends State<_ReportAreaSheet> {
   }
 }
 
-// ─── Top Search Bar ──────────────────────────────────────────────────────────
-
-class _TopSearchBar extends StatelessWidget {
-  final ColorScheme colorScheme;
-  final TextTheme textTheme;
-  const _TopSearchBar({required this.colorScheme, required this.textTheme});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      height: 52,
-      decoration: BoxDecoration(
-        color: colorScheme.surface,
-        borderRadius: BorderRadius.circular(28),
-        boxShadow: [
-          BoxShadow(
-              color: Colors.black.withValues(alpha: 0.08),
-              blurRadius: 12,
-              offset: const Offset(0, 4))
-        ],
-      ),
-      child: Row(
-        children: [
-          const SizedBox(width: 16),
-          Icon(Icons.eco_rounded, color: colorScheme.primary, size: 22),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Text('Explore DDA Parks in Delhi',
-                style: textTheme.bodyMedium
-                    ?.copyWith(color: colorScheme.onSurfaceVariant)),
-          ),
-          Container(
-            margin: const EdgeInsets.only(right: 6),
-            decoration: BoxDecoration(
-                color: colorScheme.primaryContainer, shape: BoxShape.circle),
-            child: IconButton(
-              icon: Icon(Icons.search_rounded,
-                  color: colorScheme.onPrimaryContainer, size: 20),
-              onPressed: () {},
-              padding: const EdgeInsets.all(8),
-              constraints: const BoxConstraints(),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
 
 // ─── Right-side Filter Buttons ───────────────────────────────────────────────
 
